@@ -1,0 +1,466 @@
+{
+  "name": "Agentic AI- demo",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {}
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -640,
+        0
+      ],
+      "id": "ac0013d8-8eb7-406c-af03-01b9157fb8e3",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "22YydF2QUuzQbbXm",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get email data from Gmail Trigger\nconst fromRaw = $input.first().json.From || $input.first().json.from || '';\nconst senderMatch = fromRaw.match(/<(.+?)>/);\nconst sender = senderMatch ? senderMatch[1] : fromRaw.trim();\n\nconst body = $input.first().json.text\n  || $input.first().json.snippet\n  || $input.first().json.body\n  || '';\n\nconst subject = $input.first().json.Subject\n  || $input.first().json.subject\n  || '';\n\nconst threadId = $input.first().json.id || '';\n\n// Extract order number\nconst orderMatch = body.match(/order\\s*#?\\s*(\\d+)/i)\n  || body.match(/#(\\d+)/)\n  || body.match(/\\b(\\d{4,6})\\b/);\nconst orderNumber = orderMatch ? orderMatch[1] : 'UNKNOWN';\n\n// Detect return reason\nconst reasons = ['damaged', 'wrong item', 'not as described', 'late', 'defective', 'broken', 'faulty'];\nconst reason = reasons.find(r => body.toLowerCase().includes(r)) || 'unspecified';\n\n// Detect escalation keywords\nconst escalationWords = ['trading standards', 'solicitor', 'legal action', 'court', 'report you', 'consumer rights'];\nconst needsEscalation = escalationWords.some(w => body.toLowerCase().includes(w));\n\n// Fake order database (replace with real DB in production)\nconst orders = {\n  '12345': '2026-05-01',  // within 30 days → AUTO\n  '67890': '2026-03-01',  // outside 30 days → GATE\n  '11111': '2026-04-30',  // within 30 days → AUTO\n};\n\nconst orderDate = orders[orderNumber];\nlet withinWindow = false;\n\nif (orderDate) {\n  const diffDays = (new Date() - new Date(orderDate)) / (1000 * 60 * 60 * 24);\n  withinWindow = diffDays <= 30;\n} else {\n  // No order found — default to WITHIN\n  withinWindow = true;\n}\n\nreturn [{ json: { orderNumber, reason, sender, threadId, body, subject, needsEscalation, withinWindow } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "c43561f9-349f-47b4-b79a-450d5c2ec1ce",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "You are a returns eligibility checker for an online store. Your only job is to determine if an order is within a 30-day return window based on the customer's email. Reply with ONLY one word: WITHIN or OUTSIDE. Do not explain your answer.\n"
+            },
+            {
+              "content": "=Customer email received today ({{ new Date().toISOString().split('T')[0] }}):\n\nSubject: {{ $json.subject }}\nBody: {{ $json.body }}\n\nIf no purchase date is mentioned in the email, assume the order IS within the 30-day return window and reply WITHIN. Otherwise check the date and reply WITHIN or OUTSIDE only."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -208,
+        0
+      ],
+      "id": "9c16c608-99d3-4c35-98f5-5bd735b61bb9",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "z5zcEWJHQAfUm9B3",
+          "name": "OpenAI account 7"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiResponse = $input.first().json.content?.[0]?.text?.trim() || '';\nconst prev = $('Code in JavaScript').first().json;\n\n// Use withinWindow from Step 2 directly, not from OpenAI\nreturn [{\n  json: {\n    ...prev,\n    aiWindowResponse: aiResponse\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        0
+      ],
+      "id": "23bea4be-a4a9-43c2-bc5d-d493f05fd49d",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.needsEscalation }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "078c1627-6f14-42ce-bada-14021fc38914"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "=ESCALATE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "3708007c-064b-4add-add6-92e3404d7e29",
+                    "leftValue": "={{ $json.withinWindow }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "AUTO - send label"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "906b0111-c1b8-4c53-a20e-5fc283e6429c",
+                    "leftValue": "={{ $json.withinWindow  }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GATE - needs approval"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        320,
+        128
+      ],
+      "id": "1cafee2d-137c-40e2-9166-62c0870c2bb9",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.sender }}",
+        "subject": "=Your return label – order #{{ $json.orderNumber }}",
+        "emailType": "text",
+        "message": "=Hi there,\n\nThank you for getting in touch. We've processed your return request for order #{{ $json.orderNumber }}.\n\nPlease pack the item securely and drop it off at any post office within 14 days. Our team will be in touch shortly with your return instructions.\n\nOnce we receive the item, we'll process your refund within 3–5 working days.\n\nKind regards,\nThe Returns Team",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        144
+      ],
+      "id": "94fd5bd3-1292-4564-8ab8-c19aee29793c",
+      "name": "Send a message",
+      "webhookId": "97c34da6-a110-4b98-bd47-fedb32b883f0",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "22YydF2QUuzQbbXm",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "manager@yourcompany.com",
+        "subject": "=APPROVAL NEEDED: Return exception – order #{{ $json.orderNumber }}",
+        "emailType": "text",
+        "message": "=Hi, \n\nA customer has requested a return outside our 30-day policy. Please review the AI-drafted response below. \n\n--- CUSTOMER'S ORIGINAL EMAIL --- \nFrom: {{ $json.sender }} \nOrder: #{{ $json.orderNumber }} \nReason: {{ $json.reason }}\nMessage: {{ $json.body }}  --- \n\nAI DRAFT RESPONSE (edit before sending) ---\n{{ $json.aiDraft}}  \n\n--- Please copy, edit if needed, and send directly to: {{ $json.sender }}  \n\nThe Returns Automation System",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        384
+      ],
+      "id": "0e323b57-9c99-47f4-903c-dcb8a7ba9400",
+      "name": "Send a message1",
+      "webhookId": "30334e5f-194b-4936-8e20-3abb683bbf6e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "22YydF2QUuzQbbXm",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiDraft = $('Message a model1').first().json.output?.[0]?.content?.[0]?.text?.trim() || '';\nconst prev = $('Code in JavaScript').first().json;\n\nreturn [{ json: { ...prev, aiDraft } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        384
+      ],
+      "id": "a6881319-664e-42b4-ad65-33610e506383",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "sendTo": "escalations@yourcompany.com",
+        "subject": "=URGENT – Customer escalation: order #{{ $json.orderNumber }}",
+        "emailType": "text",
+        "message": "=URGENT – This customer email has been flagged for escalation. \n\nA legal threat or Trading Standards mention was detected. Do NOT use the automated system to reply \n— please handle this personally.  \n\n--- CUSTOMER DETAILS --- \nFrom: {{ $json.sender }} \nOrder: #{{ $json.orderNumber }} \nSubject: {{ $json.subject }}  \n\n--- FULL EMAIL --- \n\n{{ $json.body }} \n\n---  \nThis alert was sent automatically by the Returns Automation System. No reply has been sent to the customer.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        -80
+      ],
+      "id": "e2b1c978-8752-437f-855d-c55c1fbc857d",
+      "name": "Send a message2",
+      "webhookId": "409724f6-295b-4187-bbeb-c34a0f4a6cfa",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "22YydF2QUuzQbbXm",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Code in JavaScript1').first().json;\n\nreturn [{ json: { ...prev } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        -80
+      ],
+      "id": "4f7c3dfc-0f2f-45bc-9c6d-de3b2cca904b",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Code in JavaScript1').first().json;\n\nreturn [{ json: { ...prev } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        144
+      ],
+      "id": "ae6f3f71-2879-4cb7-a898-b2982a5d7220",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "You are a polite customer service assistant for an online store. Write a professional, empathetic email to a customer whose return request falls outside our 30-day policy. Do NOT promise a refund or exception. Do NOT include a subject line. Just write the email body starting with \"Hi there,\"."
+            },
+            {
+              "content": "=Write a polite exception request email for this situation:\n- Order number: {{ $json.orderNumber }}\n- Return reason given: {{ $json.reason }}\n- Original customer message: {{ $json.body }}\n\nThe order is outside our 30-day return window. Acknowledge their request, explain the policy kindly, and let them know their case will be reviewed by our team."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        288,
+        384
+      ],
+      "id": "cc517423-3ba0-4a12-b67f-b87c7a571c9f",
+      "name": "Message a model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "z5zcEWJHQAfUm9B3",
+          "name": "OpenAI account 7"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        []
+      ]
+    },
+    "Message a model1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8509dfb5-86a4-4fc5-8966-28a80027cf50",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33b106639acae0f319b4d9e5569aaaf2adc9ecd27fc8db99f21ce5b234e4415f"
+  },
+  "nodeGroups": [],
+  "id": "HEytDENOAXrfcpM1",
+  "tags": []
+}
