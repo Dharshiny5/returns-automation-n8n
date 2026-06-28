@@ -56,8 +56,6 @@ flowchart LR
     D -->|Human Review| G[AI drafts response] --> H[Sent to staff for<br/>review and approval]
 ```
 
-![n8n workflow canvas](assets/n8n-canvas-screenshot.png)
-
 ## Outcomes and Benefits
 
 - Faster response times
